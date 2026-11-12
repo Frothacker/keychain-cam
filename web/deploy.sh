@@ -3,5 +3,5 @@
 set -e
 cd "$(dirname "$0")"
 rm -rf ../build/site && mkdir -p ../build/site/keychain-cam
-cp index.html sw.js manifest.webmanifest *.png ../build/site/keychain-cam/
+cp -R index.html sw.js manifest.webmanifest *.png *.js sound noise ../build/site/keychain-cam/
 npx -y wrangler@4 deploy --config wrangler.jsonc

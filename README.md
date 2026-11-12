@@ -1,9 +1,10 @@
 # Keychain Cam
 
-A tiny macOS companion for the cheap **"G6" 1080p keychain cameras** sold on AliExpress (the ones with a 0.96" screen, a flash and a USB‑C port, built around the **HX‑Tech HX330X** chip).
+A tiny macOS companion for the cheap **"G6" 1080p keychain cameras** sold on [AliExpress](https://www.aliexpress.com/item/1005010428506117.html) (the ones with a 0.96" screen, a flash and a USB‑C port, built around the **HX‑Tech HX330X** chip).
 
 - **Keychain Cam.app**: a live view of the camera over USB with **photos**, **video with sound** and **time‑lapse**.
 - **[Web version](https://finns.page/keychain-cam/)**: live view, photos and video in the browser, with nothing to install and offline support (Mac, Windows, Chromebook, Android; source in [`web/`](web/)).
+- **[Sound Lab](https://finns.page/keychain-cam/sound/)**: record a clip from the camera mic, loop it and try noise filters (RNNoise and GTCRN AI denoisers, gate, EQ) live; the camera page then uses your settings.
 - **Auto‑import**: plug the camera in as a drive and new photos and videos land on your Desktop, sorted by day. The camera's `.avi` videos also get an **`.mp4` copy** that plays in Photos, QuickTime and on phones.
 
 There are no dependencies: everything is plain Swift and AVFoundation, built on your Mac by the install script.

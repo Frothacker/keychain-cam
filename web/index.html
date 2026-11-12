@@ -132,6 +132,7 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
         <option value="none">No sound</option>
       </select>
       <span class="meter" id="meter" hidden><i></i></span>
+      <a href="sound/" class="small">Sound Lab</a>
     </div>
   </div>
   <div class="bar">
@@ -148,18 +149,19 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
   </div>
 
   <h2>How it works</h2>
-  <p>These keychain cameras (sold as "G6" or "mini 1080p", built on an HX‑Tech HX330X chip) turn into a normal USB webcam when you pick <b>PC Camera</b>. This page asks your browser for that webcam and does everything else on your own device: nothing is uploaded anywhere.</p>
+  <p>These keychain cameras (sold as "G6" or "mini 1080p", built on an HX‑Tech HX330X chip; <a href="https://www.aliexpress.com/item/1005010428506117.html">this is the one I bought</a>) turn into a normal USB webcam when you pick <b>PC Camera</b>. This page asks your browser for that webcam and does everything else on your own device: nothing is uploaded anywhere.</p>
   <ul>
     <li><b>Works in</b> Chrome, Edge and Safari on a Mac, Windows PC or Chromebook, and in Chrome on most Android phones.</li>
     <li><b>Not on iPhone.</b> iOS doesn't let apps or websites use USB webcams. iPads with USB‑C can, in apps.</li>
     <li><b>Offline:</b> after one visit the page keeps working with no internet. In Chrome use <i>Install</i> in the address bar, or in Safari <i>File → Add to Dock</i>, to get it as its own app.</li>
     <li><b>Photos</b> are 1920×1080 JPEGs. For the full 2560×1440 photos, use the camera on its own and copy them off the card.</li>
-    <li>The camera's own microphone is very quiet, so this page boosts it. Your computer's mic usually sounds better.</li>
+    <li><b>Sound:</b> the camera's own mic is used by default. It's very quiet and crackly, so this page boosts it and cleans it up with a small AI noise remover. Try the filters on your own voice in the <a href="sound/">Sound Lab</a>. Your computer's mic usually sounds better.</li>
   </ul>
   <p>There's also a Mac app with auto‑import and time‑lapse, and notes on hacking the camera's firmware: <a href="https://github.com/Frothacker/keychain-cam">github.com/Frothacker/keychain-cam</a>.</p>
 </main>
 
-<script>
+<script type="module">
+import { createChain, savedSettings } from './sound-chain.js';
 (() => {
   const $ = id => document.getElementById(id);
   const video = $('video'), stage = $('stage'), statusEl = $('status');
@@ -187,10 +189,12 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
     return { cams: all.filter(d => d.kind === 'videoinput'), mics: all.filter(d => d.kind === 'audioinput') };
   }
 
-  async function open(deviceId) {
+  async function open(deviceId, askMic = false) {
     stopStream();
     const want = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
-    stream = await navigator.mediaDevices.getUserMedia({ video: deviceId ? { ...want, deviceId: { exact: deviceId } } : want, audio: false });
+    // askMic: ask for the microphone in the same prompt, so the camera's mic can be the default
+    stream = await navigator.mediaDevices.getUserMedia({ video: deviceId ? { ...want, deviceId: { exact: deviceId } } : want, audio: askMic });
+    for (const t of stream.getAudioTracks()) { t.stop(); stream.removeTrack(t); }
     video.srcObject = stream;
     await video.play().catch(() => {});
     const track = stream.getVideoTracks()[0];
@@ -222,7 +226,7 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
     });
     if (currentId) camSel.value = currentId;
 
-    const keep = micSel.value || store.get('mic', 'none');
+    const keep = micSel.value || store.get('mic', '');
     micSel.innerHTML = '<option value="none">No sound</option>';
     mics.forEach((m, i) => {
       const o = document.createElement('option');
@@ -230,7 +234,9 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
       o.textContent = KEYCHAIN_MIC.test(m.label) ? 'Camera mic (boosted)' : (m.deviceId === 'default' ? 'Default mic' : (m.label || `Mic ${i + 1}`));
       micSel.appendChild(o);
     });
-    micSel.value = [...micSel.options].some(o => o.value === keep) ? keep : 'none';
+    // Default: the keychain camera's own mic (until you pick something else)
+    const camMic = mics.find(m => KEYCHAIN_MIC.test(m.label));
+    micSel.value = [...micSel.options].some(o => o.value === keep) ? keep : (camMic ? camMic.deviceId : 'none');
     return cams;
   }
 
@@ -245,7 +251,8 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
     say('Asking for the camera…');
     try {
       // Ask once with any camera so the browser reveals device names, then switch to the keychain camera.
-      let track = await open(store.get('cam', '') || undefined).catch(() => open());
+      const askMic = store.get('mic', '') !== 'none';
+      let track = await open(store.get('cam', '') || undefined, askMic).catch(() => open(undefined, askMic)).catch(() => open());
       const cams = await fillCameraMenu(track.getSettings().deviceId);
       const kc = cams.find(c => KEYCHAIN.test(c.label));
       if (kc && track.getSettings().deviceId !== kc.deviceId) {
@@ -274,28 +281,29 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
       const label = mic.getAudioTracks()[0]?.label || '';
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const src = ctx.createMediaStreamSource(mic);
-      // The camera mic is ~40 dB too quiet: high-pass, big gain, then a compressor as a limiter.
       const boost = KEYCHAIN_MIC.test(label);
-      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = boost ? 90 : 20;
-      const gain = ctx.createGain(); gain.gain.value = boost ? 40 : 1;   // about +32 dB
-      const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = boost ? -20 : -6; comp.knee.value = 12; comp.ratio.value = boost ? 8 : 2; comp.attack.value = 0.005; comp.release.value = 0.2;
+      const ctx = new AudioContext({ sampleRate: 48000 });
+      // The camera mic gets the clean-up chosen in the Sound Lab; any other mic goes through untouched.
+      const settings = boost ? savedSettings()
+        : { denoiser: 'off', gainDb: 0, highpass: 20, lowpass: 16000, presenceDb: 0, gate: false, gateDb: -55, limiter: false };
+      const chain = await createChain(ctx, settings);
+      const src = ctx.createMediaStreamSource(mic);
       const out = ctx.createMediaStreamDestination();
       const analyser = ctx.createAnalyser(); analyser.fftSize = 1024;
-      src.connect(hp).connect(gain).connect(comp);
-      comp.connect(out); comp.connect(analyser);
-      audio = { ctx, mic, stream: out.stream, analyser, raf: 0 };
+      src.connect(chain.input); chain.output.connect(out); chain.output.connect(analyser);
+      audio = { ctx, mic, chain, stream: out.stream, analyser, raf: 0 };
       $('meter').hidden = false;
-      const buf = new Float32Array(analyser.fftSize), bar = $('meter').firstElementChild;
+      const raw = ctx.createAnalyser(); raw.fftSize = 1024; src.connect(raw);
+      const buf = new Float32Array(analyser.fftSize), rbuf = new Float32Array(raw.fftSize), bar = $('meter').firstElementChild;
       // A real mic always has a little hiss. Exact zeros for 3 s mean it has stopped sending sound
       // (the keychain camera's mic does this: half a second of sound, then silence).
       let silentSince = 0, warned = false;
       const tick = () => {
+        raw.getFloatTimeDomainData(rbuf);
+        let rpk = 0; for (const v of rbuf) rpk = Math.max(rpk, Math.abs(v));
         analyser.getFloatTimeDomainData(buf);
         let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v));
-        if (peak === 0) {
+        if (rpk === 0) {
           silentSince ||= performance.now();
           if (!warned && performance.now() - silentSince > 3000) {
             warned = true;
@@ -316,6 +324,7 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
     if (!audio) return;
     cancelAnimationFrame(audio.raf);
     audio.mic.getTracks().forEach(t => t.stop());
+    audio.chain?.destroy();
     audio.ctx.close();
     audio = null;
     $('meter').hidden = true;
@@ -468,8 +477,15 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
     }
   });
 
+  // iPhones and iPads never list USB cameras in the browser, so say so up front.
+  const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  if (iOS) {
+    $('empty').querySelector('p').innerHTML = "<b>iPhones and iPads can't use USB cameras in a browser.</b> Apple doesn't allow it. Open this page on a Mac, Windows PC, Chromebook or Android phone and plug the camera in there.";
+    $('start').textContent = "Use this phone's camera instead";
+  }
+
   // Start straight away if the browser already allowed the camera on an earlier visit.
-  navigator.permissions?.query({ name: 'camera' }).then(p => { if (p.state === 'granted') start(); }).catch(() => {});
+  if (!iOS) navigator.permissions?.query({ name: 'camera' }).then(p => { if (p.state === 'granted') start(); }).catch(() => {});
 
   // Offline support
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});

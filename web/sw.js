@@ -1,6 +1,9 @@
 // Keeps Keychain Cam working offline. Bump VERSION when any file changes.
-const VERSION = 'kc-v2';
-const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
+const VERSION = 'kc-v3';
+const FILES = ['./', 'index.html', 'sound/', 'sound-chain.js', 'kc-worklets.js', 'manifest.webmanifest',
+  'icon-192.png', 'icon-512.png', 'apple-touch-icon.png',
+  'noise/index.js', 'noise/rnnoise-worklet.js', 'noise/gtcrn-worklet.js', 'noise/speex-worklet.js',
+  'noise/rnnoise.wasm', 'noise/rnnoise_simd.wasm', 'noise/gtcrn.wasm', 'noise/speex.wasm'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

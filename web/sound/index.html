@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sound Lab · Keychain Cam</title>
+<meta name="description" content="Try noise filters on a cheap microphone in real time: record a clip, loop it, and flip filters on and off.">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icon-192.png">
+<script>try{var t=localStorage.getItem('theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
+<style>
+:root {
+  --paper: #F5EFE3; --ink: #2B2622; --muted: #756A5F; --rule: #E2D8C6; --link: #2F5D8C;
+  --well: #E9E0CF; --rec: #C2412D; --ok: #3C7A4A; --accent: #2F5D8C;
+  color-scheme: light;
+  --font-text: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --paper: #1C1915; --ink: #E9E1D3; --muted: #A39684; --rule: #37312A; --link: #9CBFE3; --well: #26221D; --rec: #E0624C; --ok: #7FBF8C; --accent: #9CBFE3; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --paper: #1C1915; --ink: #E9E1D3; --muted: #A39684; --rule: #37312A; --link: #9CBFE3; --well: #26221D; --rec: #E0624C; --ok: #7FBF8C; --accent: #9CBFE3; color-scheme: dark; }
+* { box-sizing: border-box; }
+html { background: var(--paper); -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 18px/1.65 var(--font-text); }
+main { max-width: 60rem; margin: 0 auto; padding: 2.5rem 20px 4rem; }
+a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.1; margin: 1.5rem 0 0.4rem; }
+h2 { font-size: 1.15rem; margin: 2rem 0 0.6rem; }
+p { margin: 0 0 1rem; max-width: 40rem; }
+.lede { color: var(--muted); }
+.back { font-size: 0.95rem; margin: 0; }
+[hidden] { display: none !important; }
+.ui { font: 15px/1.35 var(--font-ui); }
+button, select, input { font: inherit; color: var(--ink); }
+button { cursor: pointer; border: 1px solid var(--rule); background: var(--well); border-radius: 8px; padding: 9px 14px; min-height: 42px; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; }
+button.on { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+button.recording { background: var(--rec); border-color: var(--rec); color: #fff; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+select { background: var(--well); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; min-height: 42px; max-width: 100%; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
+.status { color: var(--muted); min-height: 1.4em; margin: 6px 0 0; }
+.status.err { color: var(--rec); }
+
+.scope { position: relative; background: #12100D; border-radius: 8px; overflow: hidden; height: 190px; margin: 16px 0 0; }
+.scope canvas { display: block; width: 100%; height: 100%; }
+.scope .lbl { position: absolute; left: 10px; top: 8px; color: rgba(255,255,255,.65); font: 12px/1.3 var(--font-ui); pointer-events: none; }
+.scope .ab { position: absolute; right: 10px; top: 8px; font: 700 13px/1 var(--font-ui); padding: 5px 8px; border-radius: 5px; background: var(--ok); color: #fff; }
+.scope .ab.raw { background: #8A8075; }
+.meterbar { height: 6px; background: var(--rule); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.meterbar i { display: block; height: 100%; width: 0; background: var(--ok); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px 22px; margin-top: 8px; }
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; }
+.ctl label { font-weight: 600; }
+.ctl output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.ctl small { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
+.den { display: flex; flex-wrap: wrap; gap: 8px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+kbd { font: 12px/1 var(--font-ui); border: 1px solid currentColor; border-radius: 4px; padding: 2px 5px; opacity: .7; margin-left: 4px; }
+@media (hover: none) { kbd { display: none; } }
+@media (max-width: 600px) { body { font-size: 17px; } main { padding-top: 1.5rem; } .scope { height: 150px; } }
+</style>
+</head>
+<body>
+<main>
+  <p class="back"><a href="../">← Keychain Cam</a></p>
+  <h1>Sound Lab</h1>
+  <p class="lede">The keychain camera's mic is tiny, quiet and crackly. Record a short clip, let it loop, and flip filters on and off while you listen. When it sounds right, use those settings for your recordings.</p>
+
+  <section class="ui">
+    <div class="row">
+      <select id="mic" aria-label="Microphone"><option value="">Microphone…</option></select>
+      <button class="primary" id="rec">Record 8 s</button>
+      <button id="load">Open a recording…</button>
+      <input type="file" id="file" accept="audio/*,video/*,.mov,.mp4,.m4a,.wav,.webm" hidden>
+      <button id="live" title="Hear the mic live through the filters. Use headphones, or it will howl.">Live (headphones)</button>
+    </div>
+    <div class="row">
+      <button id="play" disabled>Play loop<kbd>Space</kbd></button>
+      <button id="bypass" disabled title="Hold B to hear the raw sound">Hear raw<kbd>B</kbd></button>
+      <button id="export" disabled>Save cleaned clip</button>
+    </div>
+    <p class="status" id="status" role="status" aria-live="polite">Pick the camera's mic (“HD audio”) and record yourself talking for a few seconds.</p>
+
+    <div class="scope">
+      <canvas id="spec"></canvas>
+      <span class="lbl">What you hear: low pitch at the bottom, high at the top. Crackle shows up as bright vertical streaks.</span>
+      <span class="ab" id="ab">FILTERED</span>
+    </div>
+    <div class="meterbar"><i id="meter"></i></div>
+
+    <h2>Filters</h2>
+    <div class="row" id="presets"></div>
+    <div class="grid">
+      <div class="ctl" style="grid-column: 1 / -1">
+        <label>Noise remover</label><output id="denOut"></output>
+        <div class="den" id="den" style="grid-column: 1 / -1"></div>
+        <small>RNNoise and GTCRN are small AI models trained to keep voices and remove everything else. They run on your device.</small>
+      </div>
+      <div class="ctl"><label for="gainDb">Boost</label><output id="gainDbOut"></output>
+        <input type="range" id="gainDb" min="0" max="40" step="1"><small>The camera mic needs about +30 dB.</small></div>
+      <div class="ctl"><label for="highpass">Cut rumble below</label><output id="highpassOut"></output>
+        <input type="range" id="highpass" min="20" max="300" step="5"><small>Handling noise, wind, hum.</small></div>
+      <div class="ctl"><label for="lowpass">Cut hiss and crackle above</label><output id="lowpassOut"></output>
+        <input type="range" id="lowpass" min="3000" max="16000" step="250"><small>Lower is smoother but duller. Voices need about 7 kHz.</small></div>
+      <div class="ctl"><label for="presenceDb">Voice presence (3 kHz)</label><output id="presenceDbOut"></output>
+        <input type="range" id="presenceDb" min="-6" max="9" step="0.5"><small>Makes speech clearer after cutting the top.</small></div>
+      <div class="ctl"><label class="check"><input type="checkbox" id="gate"> Gate (quiet between words)</label><output id="gateDbOut"></output>
+        <input type="range" id="gateDb" min="-80" max="-25" step="1"><small>Below this level it fades out. Too high cuts off words.</small></div>
+      <div class="ctl"><label class="check"><input type="checkbox" id="limiter"> Limiter</label><output></output>
+        <small>Stops loud bits from distorting after the boost.</small></div>
+    </div>
+
+    <div class="row" style="margin-top:22px">
+      <button class="primary" id="use">Use these settings for recordings</button>
+      <span id="useNote" class="status"></span>
+    </div>
+  </section>
+
+  <h2>What's going on</h2>
+  <p>The camera mic picks up speech about 40 dB quieter than a normal mic, so everything has to be boosted a lot, and the boost makes its hiss and crackle loud too. Simple filters (cutting the top end, a gate) help a bit. The AI noise removers are the big step: they've learned what a voice sounds like and throw away the rest. Your clip never leaves your device.</p>
+  <p>Apple's own <i>Voice Isolation</i> (the one in FaceTime and Final Cut) is even stronger, but browsers can't use it. The Mac app can.</p>
+</main>
+
+<script type="module">
+import { createChain, loadWorklets, DENOISERS, PRESETS, savedSettings, saveSettings } from '../sound-chain.js';
+
+const $ = id => document.getElementById(id);
+const say = (m, err) => { $('status').textContent = m; $('status').classList.toggle('err', !!err); };
+const SLIDERS = { gainDb: v => `+${v} dB`, highpass: v => `${v} Hz`, lowpass: v => v >= 16000 ? 'off' : `${(v / 1000).toFixed(v % 1000 ? 2 : 0)} kHz`, presenceDb: v => `${v > 0 ? '+' : ''}${v} dB`, gateDb: v => `${v} dB` };
+
+let ctx, chain, analyser, clip = null, player = null, live = null, raw = false;
+let clipIsRawMic = false;   // true when the clip was recorded here (so its boost suits live recording)
+let settings = savedSettings();
+
+async function ensureAudio() {
+  if (ctx) { if (ctx.state === 'suspended') await ctx.resume(); return; }
+  ctx = new AudioContext({ sampleRate: 48000 });
+  chain = await createChain(ctx, settings);
+  analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0;
+  chain.output.connect(analyser); analyser.connect(ctx.destination);
+  draw();
+}
+
+// ---------- controls ----------
+function renderControls() {
+  for (const k of Object.keys(SLIDERS)) { $(k).value = settings[k]; $(k + 'Out').textContent = SLIDERS[k](+settings[k]); }
+  $('gate').checked = settings.gate; $('limiter').checked = settings.limiter;
+  for (const b of $('den').children) b.classList.toggle('on', b.dataset.k === settings.denoiser);
+  $('denOut').textContent = '';
+  for (const b of $('presets').children) b.classList.toggle('on', Object.entries(PRESETS[b.dataset.k]).every(([k, v]) => k === 'name' || k === 'gainDb' || settings[k] === v));
+}
+function change(patch) {
+  settings = { ...settings, ...patch };
+  renderControls();
+  if (chain) {
+    const p = chain.set(settings);
+    if (patch.denoiser && patch.denoiser !== 'off') { $('denOut').textContent = 'loading…'; p.then(() => $('denOut').textContent = ''); }
+  }
+  $('useNote').textContent = '';
+}
+for (const [k, name] of Object.entries(DENOISERS)) {
+  const b = document.createElement('button'); b.textContent = name; b.dataset.k = k; b.type = 'button';
+  b.onclick = () => change({ denoiser: k }); $('den').appendChild(b);
+}
+for (const [k, p] of Object.entries(PRESETS)) {
+  const b = document.createElement('button'); b.textContent = p.name; b.dataset.k = k; b.type = 'button';
+  b.onclick = () => { const { name, gainDb, ...s } = p; change(s); }; $('presets').appendChild(b);
+}
+for (const k of Object.keys(SLIDERS)) $(k).oninput = () => change({ [k]: +$(k).value });
+$('gate').onchange = () => change({ gate: $('gate').checked });
+$('limiter').onchange = () => change({ limiter: $('limiter').checked });
+renderControls();
+
+$('use').onclick = () => {
+  // A clip opened from a file may already be boosted, so its boost isn't right for the live mic: keep the saved one.
+  const s = clipIsRawMic || live ? settings : { ...settings, gainDb: savedSettings().gainDb };
+  saveSettings(s);
+  $('useNote').textContent = 'Saved. The camera page will use these for videos with sound' + (s === settings ? '.' : ` (boost stays +${s.gainDb} dB: record a clip here to set it).`);
+};
+
+// ---------- A/B ----------
+function setRaw(on) {
+  raw = on; chain?.bypass(on);
+  $('bypass').classList.toggle('on', on);
+  $('ab').textContent = on ? 'RAW' : 'FILTERED'; $('ab').classList.toggle('raw', on);
+}
+$('bypass').onclick = () => setRaw(!raw);
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input[type=file], select') || e.metaKey || e.ctrlKey) return;
+  if ((e.key === 'b' || e.key === 'B') && !e.repeat) setRaw(true);
+  if (e.code === 'Space' && !e.target.closest('button, input')) { e.preventDefault(); if (clip) togglePlay(); }
+});
+document.addEventListener('keyup', e => { if (e.key === 'b' || e.key === 'B') setRaw(false); });
+
+// ---------- microphones ----------
+async function listMics(selectId) {
+  const mics = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+  const sel = $('mic'), keep = selectId || sel.value || localStorage.getItem('kc.labMic') || '';
+  sel.innerHTML = '';
+  for (const m of mics) {
+    const o = document.createElement('option'); o.value = m.deviceId;
+    o.textContent = /HD audio/i.test(m.label) ? 'Keychain camera mic' : (m.label || 'Microphone');
+    sel.appendChild(o);
+  }
+  const cam = mics.find(m => /HD audio/i.test(m.label));
+  sel.value = [...sel.options].some(o => o.value === keep) ? keep : (cam?.deviceId || sel.options[0]?.value || '');
+}
+async function openMic() {
+  const id = $('mic').value;
+  const constraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...constraints, deviceId: { exact: id } } : constraints });
+  if (!id || !$('mic').options.length || !$('mic').options[0].value) await listMics(stream.getAudioTracks()[0].getSettings().deviceId);
+  try { localStorage.setItem('kc.labMic', $('mic').value); } catch {}
+  return stream;
+}
+$('mic').onfocus = () => { if ($('mic').options.length <= 1) navigator.mediaDevices.getUserMedia({ audio: true }).then(s => { s.getTracks().forEach(t => t.stop()); listMics(); }).catch(() => {}); };
+$('mic').onchange = () => { try { localStorage.setItem('kc.labMic', $('mic').value); } catch {} if (live) { stopLive(); startLive(); } };
+navigator.mediaDevices?.enumerateDevices().then(d => { if (d.some(x => x.kind === 'audioinput' && x.label)) listMics(); });
+
+// ---------- recording a clip (raw samples, no compression) ----------
+$('rec').onclick = async () => {
+  if (!navigator.mediaDevices?.getUserMedia) { say("This browser can't use microphones here.", true); return; }
+  stopPlay(); stopLive();
+  try {
+    await ensureAudio(); await loadWorklets(ctx);
+    const stream = await openMic();
+    const src = ctx.createMediaStreamSource(stream);
+    const rec = new AudioWorkletNode(ctx, 'kc-recorder');
+    const sink = ctx.createGain(); sink.gain.value = 0;
+    const parts = []; rec.port.onmessage = e => parts.push(e.data);
+    src.connect(rec); rec.connect(sink); sink.connect(ctx.destination);
+    // Monitor what's coming in on the spectrum while recording (muted)
+    const tap = ctx.createGain(); tap.gain.value = 0; src.connect(chain.input);
+    $('rec').disabled = true; $('rec').classList.add('recording');
+    const label = stream.getAudioTracks()[0].label;
+    for (let s = 8; s > 0; s--) { $('rec').textContent = `Recording… ${s}`; say(`Talk normally, about an arm's length from the ${/HD audio/i.test(label) ? 'camera' : 'mic'}.`); await new Promise(r => setTimeout(r, 1000)); }
+    src.disconnect(); rec.disconnect(); stream.getTracks().forEach(t => t.stop());
+    const n = parts.reduce((a, p) => a + p.length, 0), data = new Float32Array(n); let o = 0;
+    for (const p of parts) { data.set(p, o); o += p.length; }
+    clip = ctx.createBuffer(1, n, ctx.sampleRate); clip.copyToChannel(data, 0);
+    clipIsRawMic = true;
+    afterClip(`Recorded 8 s from ${/HD audio/i.test(label) ? 'the camera mic' : label}.`, data);
+  } catch (e) { console.error(e); say(e.name === 'NotAllowedError' ? 'Microphone access was blocked. Allow it in the address bar and try again.' : 'Could not record: ' + e.message, true); }
+  finally { $('rec').disabled = false; $('rec').classList.remove('recording'); $('rec').textContent = 'Record 8 s'; }
+};
+
+// ---------- or open a file ----------
+$('load').onclick = () => $('file').click();
+$('file').onchange = async () => {
+  const f = $('file').files[0]; if (!f) return;
+  stopPlay(); stopLive();
+  try {
+    await ensureAudio();
+    say('Reading ' + f.name + '…');
+    const buf = await ctx.decodeAudioData(await f.arrayBuffer());
+    const mono = ctx.createBuffer(1, buf.length, buf.sampleRate), d = mono.getChannelData(0);
+    for (let c = 0; c < buf.numberOfChannels; c++) { const s = buf.getChannelData(c); for (let i = 0; i < s.length; i++) d[i] += s[i] / buf.numberOfChannels; }
+    clip = mono; clipIsRawMic = false;
+    afterClip(`Opened ${f.name}.`, d);
+  } catch (e) { console.error(e); say("Couldn't read that file's sound. Try a .mov, .mp4, .m4a or .wav.", true); }
+  $('file').value = '';
+};
+
+// Suggest a boost from how loud the speech in the clip is (aim for about −18 dB).
+function afterClip(msg, data) {
+  const w = Math.round(ctx.sampleRate * 0.05), levels = [];
+  for (let i = 0; i + w <= data.length; i += w) { let s = 0; for (let j = i; j < i + w; j++) s += data[j] * data[j]; const r = Math.sqrt(s / w); if (r > 1e-6) levels.push(r); }
+  levels.sort((a, b) => b - a);
+  const loud = levels.slice(0, Math.max(1, levels.length / 5 | 0)), speech = loud.reduce((a, b) => a + b, 0) / loud.length;
+  if (!levels.length) { say(msg + ' It is completely silent: the mic sent nothing. Replug the camera or pick another mic.', true); return; }
+  const want = Math.round(Math.max(0, Math.min(40, 20 * Math.log10(0.126 / speech))));
+  change({ gainDb: want });
+  say(`${msg} Speech level ${(20 * Math.log10(speech)).toFixed(0)} dB, so the boost is set to +${want} dB. Now try the filters.`);
+  $('play').disabled = $('bypass').disabled = $('export').disabled = false;
+  startPlay();
+}
+
+// ---------- playback ----------
+function startPlay() {
+  stopPlay();
+  player = ctx.createBufferSource(); player.buffer = clip; player.loop = true;
+  player.connect(chain.input); player.start();
+  $('play').textContent = 'Stop'; $('play').classList.add('on');
+  $('play').insertAdjacentHTML('beforeend', '<kbd>Space</kbd>');
+}
+function stopPlay() {
+  if (player) { player.stop(); player.disconnect(); player = null; }
+  $('play').textContent = 'Play loop'; $('play').classList.remove('on'); $('play').insertAdjacentHTML('beforeend', '<kbd>Space</kbd>');
+}
+function togglePlay() { player ? stopPlay() : startPlay(); }
+$('play').onclick = togglePlay;
+
+// ---------- live ----------
+async function startLive() {
+  await ensureAudio();
+  const stream = await openMic();
+  const src = ctx.createMediaStreamSource(stream); src.connect(chain.input);
+  live = { stream, src };
+  $('live').classList.add('on'); $('live').textContent = 'Stop live'; $('bypass').disabled = false;
+  say('Live: you hear the mic through the filters (with a little delay). Headphones on!');
+}
+function stopLive() {
+  if (!live) return;
+  live.src.disconnect(); live.stream.getTracks().forEach(t => t.stop()); live = null;
+  $('live').classList.remove('on'); $('live').textContent = 'Live (headphones)';
+}
+$('live').onclick = async () => { if (live) { stopLive(); say('Live off.'); return; } stopPlay(); try { await startLive(); } catch (e) { say('Could not open the mic: ' + e.message, true); } };
+
+// ---------- export: render the clip through the same chain, offline ----------
+$('export').onclick = async () => {
+  if (!clip) return;
+  $('export').disabled = true; say('Rendering…');
+  try {
+    // The AI models load asynchronously inside the audio thread, and offline rendering runs much faster
+    // than real time. So: half a second of silence first, pause there until they're ready, then trim it off.
+    const pre = 0.5, off = new OfflineAudioContext(1, clip.length + pre * 48000, 48000);
+    const ch = await createChain(off, settings);
+    const src = off.createBufferSource(); src.buffer = clip; src.connect(ch.input); ch.output.connect(off.destination); src.start(pre);
+    off.suspend(0.1).then(() => setTimeout(() => off.resume(), 1500));
+    const out = await off.startRendering();
+    const blob = wav(out.getChannelData(0).subarray(pre * 48000), 48000);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `keychain-cam-sound_${settings.denoiser}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.wav`;
+    document.body.appendChild(a); a.click(); a.remove();
+    say('Saved ' + a.download + ' to Downloads.');
+  } catch (e) { console.error(e); say('Could not render: ' + e.message, true); }
+  $('export').disabled = false;
+};
+function wav(x, sr) {
+  const b = new DataView(new ArrayBuffer(44 + x.length * 2)), w = (o, s) => [...s].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); b.setUint32(4, 36 + x.length * 2, true); w(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, sr, true); b.setUint32(28, sr * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, x.length * 2, true);
+  for (let i = 0; i < x.length; i++) b.setInt16(44 + i * 2, Math.max(-1, Math.min(1, x[i])) * 32767, true);
+  return new Blob([b], { type: 'audio/wav' });
+}
+
+// ---------- scrolling spectrogram + meter ----------
+function draw() {
+  const cv = $('spec'), g = cv.getContext('2d');
+  const bins = new Uint8Array(analyser.frequencyBinCount), wave = new Float32Array(analyser.fftSize);
+  const nyq = ctx.sampleRate / 2, fMax = 16000;
+  const frame = () => {
+    const W = cv.clientWidth * devicePixelRatio | 0, H = cv.clientHeight * devicePixelRatio | 0;
+    if (!W || !H) { requestAnimationFrame(frame); return; }
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; g.fillStyle = '#12100D'; g.fillRect(0, 0, W, H); }
+    analyser.getByteFrequencyData(bins);
+    g.drawImage(cv, -2, 0);                         // scroll left
+    for (let y = 0; y < H; y++) {
+      // log frequency scale from 60 Hz to 16 kHz
+      const f = 60 * Math.pow(fMax / 60, 1 - y / H), v = bins[Math.min(bins.length - 1, Math.round(f / nyq * bins.length))] / 255;
+      g.fillStyle = `hsl(${30 + 30 * v}, ${40 + 50 * v}%, ${Math.round(4 + 70 * v * v)}%)`;
+      g.fillRect(W - 2, y, 2, 1);
+    }
+    analyser.getFloatTimeDomainData(wave);
+    let pk = 0; for (const s of wave) pk = Math.max(pk, Math.abs(s));
+    $('meter').style.width = Math.min(100, Math.max(0, (20 * Math.log10(pk + 1e-6) + 60) / 60 * 100)) + '%';
+    $('meter').style.background = pk > 0.95 ? 'var(--rec)' : 'var(--ok)';
+    requestAnimationFrame(frame);
+  };
+  frame();
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../sw.js').catch(() => {});
+</script>
+</body>
+</html>
