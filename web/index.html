@@ -141,6 +141,7 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
     <label class="check" id="folderWrap" hidden><input type="checkbox" id="folderOn"> Save into a folder <button id="folderPick" type="button" hidden>Choose…</button></label>
   </div>
   <p class="status" id="status" role="status" aria-live="polite"></p>
+  <details class="small" id="devWrap" hidden><summary>Devices this browser can see</summary><ul id="devList"></ul></details>
 
   <div id="shotsWrap" hidden>
     <h2>Taken this visit</h2>
@@ -237,6 +238,14 @@ import { createChain, savedSettings } from './sound-chain.js';
     // Default: the keychain camera's own mic (until you pick something else)
     const camMic = mics.find(m => KEYCHAIN_MIC.test(m.label));
     micSel.value = [...micSel.options].some(o => o.value === keep) ? keep : (camMic ? camMic.deviceId : 'none');
+    // Troubleshooting list: every camera and mic the browser offers
+    $('devList').innerHTML = '';
+    for (const d of [...cams, ...mics]) {
+      const li = document.createElement('li');
+      li.textContent = `${d.kind === 'videoinput' ? 'Camera' : 'Mic'}: ${d.label || '(no name)'}${KEYCHAIN.test(d.label) || KEYCHAIN_MIC.test(d.label) ? ' ← keychain camera' : ''}`;
+      $('devList').appendChild(li);
+    }
+    $('devWrap').hidden = false;
     return cams;
   }
 
@@ -261,6 +270,7 @@ import { createChain, savedSettings } from './sound-chain.js';
       }
       showEmpty(false);
       if (kc) say('Keychain camera connected.');
+      else if (iOS) say(`This ${/iPad/.test(navigator.userAgent) || navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent) ? 'iPad' : 'iPhone'} only offers its own cameras (${cams.length} found), not the keychain camera. iOS usually doesn't let websites use USB cameras.`, true);
       else say("Couldn't find the keychain camera, so this is another camera. Plug it in, pick PC Camera on it, then choose it in the camera menu.", true);
       store.set('cam', track.getSettings().deviceId || '');
       if (micSel.value !== 'none') startAudio(micSel.value);
@@ -477,15 +487,10 @@ import { createChain, savedSettings } from './sound-chain.js';
     }
   });
 
-  // iPhones and iPads never list USB cameras in the browser, so say so up front.
   const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-  if (iOS) {
-    $('empty').querySelector('p').innerHTML = "<b>iPhones and iPads can't use USB cameras in a browser.</b> Apple doesn't allow it. Open this page on a Mac, Windows PC, Chromebook or Android phone and plug the camera in there.";
-    $('start').textContent = "Use this phone's camera instead";
-  }
 
   // Start straight away if the browser already allowed the camera on an earlier visit.
-  if (!iOS) navigator.permissions?.query({ name: 'camera' }).then(p => { if (p.state === 'granted') start(); }).catch(() => {});
+  navigator.permissions?.query({ name: 'camera' }).then(p => { if (p.state === 'granted') start(); }).catch(() => {});
 
   // Offline support
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});

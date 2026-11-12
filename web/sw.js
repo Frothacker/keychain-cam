@@ -1,5 +1,5 @@
 // Keeps Keychain Cam working offline. Bump VERSION when any file changes.
-const VERSION = 'kc-v3';
+const VERSION = 'kc-v5';
 const FILES = ['./', 'index.html', 'sound/', 'sound-chain.js', 'kc-worklets.js', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png', 'apple-touch-icon.png',
   'noise/index.js', 'noise/rnnoise-worklet.js', 'noise/gtcrn-worklet.js', 'noise/speex-worklet.js',
