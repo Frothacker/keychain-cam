@@ -2,7 +2,10 @@
 // IMA-ADPCM audio) into an H.264/AAC .mp4 that plays in Photos, QuickTime and on phones.
 // No dependencies: parses the AVI (RIFF) container itself and encodes with AVFoundation.
 //
-// Usage: avi2mp4 <in.avi> <out.mp4>
+// Quiet audio (the camera's mic is weak) is raised to a normal level with a gentle noise
+// gate, the same way Keychain Cam.app does it; pass --no-boost to keep it as recorded.
+//
+// Usage: avi2mp4 [--no-boost] <in.avi> <out.mp4>
 
 import Foundation
 import AVFoundation
@@ -14,8 +17,9 @@ func fail(_ m: String) -> Never {
     exit(1)
 }
 
-let args = CommandLine.arguments
-guard args.count == 3 else { fail("usage: avi2mp4 <in.avi> <out.mp4>") }
+let boostEnabled = !CommandLine.arguments.contains("--no-boost")
+let args = CommandLine.arguments.filter { !$0.hasPrefix("--") }
+guard args.count == 3 else { fail("usage: avi2mp4 [--no-boost] <in.avi> <out.mp4>") }
 let inURL = URL(fileURLWithPath: args[1])
 let outURL = URL(fileURLWithPath: args[2])
 guard let fileData = try? Data(contentsOf: inURL, options: .alwaysMapped) as NSData else { fail("can't read \(args[1])") }
@@ -153,6 +157,51 @@ if let audio = streams.first(where: { $0.type == "auds" }), audio.fmt > 0, !audi
     if pcm.isEmpty || sampleRate <= 0 { sampleRate = 0 }
 }
 
+// MARK: - Sound boost (same as Keychain Cam.app's AudioBoost)
+
+/// Raises quiet speech towards −18 dBFS (max +36 dB) with a ~90 Hz high-pass, a gentle noise
+/// gate a little above the hiss, and a soft limiter. Returns the gain in dB, or nil if unchanged.
+func boostPCM(_ pcm: inout [Int16], sampleRate: Int, channels: Int) -> Float? {
+    let sr = Float(sampleRate)
+    var x = pcm.map { Float($0) / 32768 }
+    var levels: [Float] = [], sum: Float = 0, n = 0
+    let window = max(1, sampleRate / 20) * channels
+    for v in x { sum += v * v; n += 1; if n == window { levels.append((sum / Float(n)).squareRoot()); sum = 0; n = 0 } }
+    let audible = levels.filter { $0 > 1e-6 }.sorted(by: >)
+    guard !audible.isEmpty else { return nil }
+    let loud = audible.prefix(max(1, audible.count / 5))
+    let speech = loud.reduce(0, +) / Float(loud.count)
+    let gain = min(63.1, 0.126 / speech)
+    guard gain >= 1.41 else { return nil }
+    let quiet = audible.suffix(max(1, audible.count / 10))
+    let threshold = min(quiet.reduce(0, +) / Float(quiet.count) * 2, speech * 0.2)
+
+    let rc = 1 / (2 * Float.pi * 90), alpha = rc / (rc + 1 / sr)
+    let envCoef = exp(-1 / (sr * 0.020)), openCoef = exp(-1 / (sr * 0.003)), closeCoef = exp(-1 / (sr * 0.150))
+    var prevIn = [Float](repeating: 0, count: channels), prevOut = prevIn
+    var envelope: Float = 0, gate: Float = 1
+    for i in 0..<x.count {
+        let c = i % channels
+        let y = alpha * (prevOut[c] + x[i] - prevIn[c])
+        prevIn[c] = x[i]; prevOut[c] = y
+        envelope = envCoef * envelope + (1 - envCoef) * abs(y)
+        let r = envelope / threshold
+        let target: Float = r >= 1 ? 1 : max(0.125, r * r)
+        gate = target > gate ? openCoef * gate + (1 - openCoef) * target : closeCoef * gate + (1 - closeCoef) * target
+        var z = y * gain * gate
+        let m = abs(z)
+        if m > 0.45 { z = (z < 0 ? -1 : 1) * (0.45 + 0.35 * tanh((m - 0.45) / 0.35)) }
+        x[i] = z
+    }
+    pcm = x.map { Int16(max(-32768, min(32767, $0 * 32767))) }
+    return 20 * log10(gain)
+}
+
+var boostNote = ""
+if boostEnabled, sampleRate > 0, !pcm.isEmpty, let db = boostPCM(&pcm, sampleRate: sampleRate, channels: channels) {
+    boostNote = String(format: ", boosted +%.0f dB", db)
+}
+
 // MARK: - Encoding
 
 try? FileManager.default.removeItem(at: outURL)
@@ -278,4 +327,4 @@ guard writer.status == .completed, writtenFrames > 0 else {
 print(String(format: "avi2mp4: %@ → %@  %dx%d %@ @ %.2f fps, %d frames (%d unreadable), %.1fs, audio: %@%@",
              inURL.lastPathComponent, outURL.lastPathComponent, width, height, codec, fps, writtenFrames, badFrames,
              videoDuration.seconds, audioDescription,
-             sampleRate > 0 ? " \(sampleRate) Hz \(channels) ch" : ""))
+             sampleRate > 0 ? " \(sampleRate) Hz \(channels) ch\(boostNote)" : ""))

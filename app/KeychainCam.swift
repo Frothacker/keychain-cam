@@ -329,6 +329,178 @@ final class TimelapseWriter {
     }
 }
 
+// MARK: - Sound boost
+
+/// Makes quiet recordings (the keychain camera's mic is very weak) comfortably loud after
+/// recording: a gentle high-pass to cut rumble, gain set from the speech level (the loudest
+/// fifth of 50 ms windows) towards −18 dBFS, capped at +36 dB, then a soft limiter so peaks
+/// never clip. Video is copied untouched. Recordings that are already loud are left alone.
+enum AudioBoost {
+    static let targetLevel: Float = 0.126      // −18 dBFS
+    static let maxGain: Float = 63.1           // +36 dB
+    static let minUsefulGain: Float = 1.41     // below +3 dB, don't bother
+
+    struct Shaper {
+        let gain: Float, alpha: Float, gateThreshold: Float
+        let envCoef: Float, openCoef: Float, closeCoef: Float
+        var prevIn: [Float], prevOut: [Float], envelope: Float = 0, gate: Float = 1
+        init(gain: Float, gateThreshold: Float, sampleRate: Double, channels: Int) {
+            let sr = Float(sampleRate)
+            let rc = 1 / (2 * Float.pi * 90), dt = 1 / sr
+            self.gain = gain; alpha = rc / (rc + dt)
+            self.gateThreshold = gateThreshold
+            envCoef = exp(-1 / (sr * 0.020))      // level = |signal| averaged over ~20 ms
+            openCoef = exp(-1 / (sr * 0.003))     // gate opens in ~3 ms (keeps word starts)
+            closeCoef = exp(-1 / (sr * 0.150))    // and closes over ~150 ms (no chatter)
+            prevIn = .init(repeating: 0, count: channels); prevOut = prevIn
+        }
+        mutating func process(_ x: UnsafeMutablePointer<Float>, count: Int, channels: Int) {
+            for i in 0..<count {
+                let c = i % channels
+                let y = alpha * (prevOut[c] + x[i] - prevIn[c])     // high-pass ~90 Hz (rumble, handling noise)
+                prevIn[c] = x[i]; prevOut[c] = y
+                // Noise gate: when the level sits near the hiss, turn it down (up to −18 dB)
+                envelope = envCoef * envelope + (1 - envCoef) * abs(y)
+                let r = envelope / gateThreshold
+                let target: Float = r >= 1 ? 1 : max(0.125, r * r)
+                gate = target > gate ? openCoef * gate + (1 - openCoef) * target
+                                     : closeCoef * gate + (1 - closeCoef) * target
+                var z = y * gain * gate
+                let m = abs(z)
+                if m > 0.45 { z = (z < 0 ? -1 : 1) * (0.45 + 0.35 * tanh((m - 0.45) / 0.35)) }   // soft limit, ceiling −2 dB (AAC overshoots a little)
+                x[i] = z
+            }
+        }
+    }
+
+    static let pcmSettings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false,
+    ]
+
+    /// The sample buffer's float samples (copied, so non-contiguous buffers are fine).
+    private static func floats(_ sb: CMSampleBuffer) -> [Float]? {
+        guard let block = CMSampleBufferGetDataBuffer(sb) else { return nil }
+        let count = CMBlockBufferGetDataLength(block) / 4
+        var x = [Float](repeating: 0, count: count)
+        guard x.withUnsafeMutableBytes({
+            CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: count * 4, destination: $0.baseAddress!)
+        }) == noErr else { return nil }
+        return x
+    }
+
+    /// Boosts the movie's sound in place. Returns the gain applied in dB, or nil if nothing was changed.
+    static func process(_ url: URL) throws -> Float? {
+        let asset = AVURLAsset(url: url)
+        guard let audio = asset.tracks(withMediaType: .audio).first else { return nil }
+        let video = asset.tracks(withMediaType: .video).first
+
+        // Pass 1: measure the speech level
+        let r1 = try AVAssetReader(asset: asset)
+        let o1 = AVAssetReaderTrackOutput(track: audio, outputSettings: pcmSettings)
+        r1.add(o1)
+        r1.startReading()
+        var sampleRate = 0.0, channels = 1
+        var levels: [Float] = [], sum: Float = 0, n = 0, window = 1
+        while let sb = o1.copyNextSampleBuffer() {
+            if sampleRate == 0, let fd = CMSampleBufferGetFormatDescription(sb),
+               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee {
+                sampleRate = asbd.mSampleRate; channels = max(1, Int(asbd.mChannelsPerFrame))
+                window = max(1, Int(sampleRate / 20)) * channels
+            }
+            guard let x = floats(sb) else { continue }
+            for i in 0..<x.count {
+                sum += x[i] * x[i]; n += 1
+                if n == window { levels.append((sum / Float(n)).squareRoot()); sum = 0; n = 0 }
+            }
+        }
+        guard sampleRate > 0, !levels.isEmpty else { return nil }
+        // Ignore stretches of pure digital silence (the camera mic sometimes sends zeros)
+        let audible = levels.filter { $0 > 1e-6 }.sorted(by: >)
+        guard !audible.isEmpty else { return nil }
+        let loud = audible.prefix(max(1, audible.count / 5))
+        let speech = loud.reduce(0, +) / Float(loud.count)
+        let gain = min(maxGain, targetLevel / speech)
+        guard gain >= minUsefulGain else { return nil }
+        // Hiss = the quietest tenth of windows. levels are RMS; the gate follows average |signal|
+        // (≈ 0.8 × RMS), so 2× the hiss RMS sits safely above hiss and well below speech.
+        let quiet = audible.suffix(max(1, audible.count / 10))
+        let noiseFloor = quiet.reduce(0, +) / Float(quiet.count)
+        let gateThreshold = min(noiseFloor * 2, speech * 0.2)
+
+        // Pass 2: copy video, rewrite audio with the boost
+        let tmp = url.deletingLastPathComponent().appendingPathComponent(".boost-\(UUID().uuidString).mov")
+        let writer = try AVAssetWriter(outputURL: tmp, fileType: .mov)
+        let reader = try AVAssetReader(asset: asset)
+        var vOut: AVAssetReaderTrackOutput?, vIn: AVAssetWriterInput?
+        if let video {
+            let o = AVAssetReaderTrackOutput(track: video, outputSettings: nil)
+            let i = AVAssetWriterInput(mediaType: .video, outputSettings: nil,
+                                       sourceFormatHint: (video.formatDescriptions.first as! CMFormatDescription))
+            i.transform = video.preferredTransform
+            i.expectsMediaDataInRealTime = false
+            reader.add(o); writer.add(i); vOut = o; vIn = i
+        }
+        let aOut = AVAssetReaderTrackOutput(track: audio, outputSettings: pcmSettings)
+        let aIn = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: channels,
+        ])
+        aIn.expectsMediaDataInRealTime = false
+        reader.add(aOut); writer.add(aIn)
+        guard reader.startReading(), writer.startWriting() else {
+            throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
+        }
+        writer.startSession(atSourceTime: .zero)
+
+        let group = DispatchGroup()
+        if let vOut, let vIn {
+            group.enter()
+            vIn.requestMediaDataWhenReady(on: DispatchQueue(label: "boost.video")) {
+                while vIn.isReadyForMoreMediaData {
+                    guard let sb = vOut.copyNextSampleBuffer() else { vIn.markAsFinished(); group.leave(); return }
+                    vIn.append(sb)
+                }
+            }
+        }
+        var shaper = Shaper(gain: gain, gateThreshold: gateThreshold, sampleRate: sampleRate, channels: channels)
+        group.enter()
+        aIn.requestMediaDataWhenReady(on: DispatchQueue(label: "boost.audio")) {
+            while aIn.isReadyForMoreMediaData {
+                guard let sb = aOut.copyNextSampleBuffer() else { aIn.markAsFinished(); group.leave(); return }
+                guard var x = floats(sb), let fd = CMSampleBufferGetFormatDescription(sb) else { continue }
+                // Shape the samples, then re-wrap them with the original format and timing
+                x.withUnsafeMutableBufferPointer { shaper.process($0.baseAddress!, count: $0.count, channels: channels) }
+                let bytes = x.count * 4
+                var block: CMBlockBuffer?
+                CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes,
+                                                   blockAllocator: nil, customBlockSource: nil, offsetToData: 0,
+                                                   dataLength: bytes, flags: kCMBlockBufferAssureMemoryNowFlag,
+                                                   blockBufferOut: &block)
+                guard let block else { continue }
+                x.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block,
+                                                                       offsetIntoDestination: 0, dataLength: bytes) }
+                var out: CMSampleBuffer?
+                CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+                    allocator: nil, dataBuffer: block, formatDescription: fd,
+                    sampleCount: CMSampleBufferGetNumSamples(sb),
+                    presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sb),
+                    packetDescriptions: nil, sampleBufferOut: &out)
+                if let out { aIn.append(out) }
+            }
+        }
+        group.wait()
+        let done = DispatchSemaphore(value: 0)
+        writer.finishWriting { done.signal() }
+        done.wait()
+        guard writer.status == .completed, reader.status == .completed else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
+        }
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
+        return 20 * log10(gain)
+    }
+}
+
 // MARK: - UI
 
 final class PreviewView: NSView {
@@ -356,6 +528,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let meter = NSLevelIndicator()
     let micPopup = NSPopUpButton()
     let intervalPopup = NSPopUpButton()
+    let boostCheck = NSButton(checkboxWithTitle: "Boost quiet sound", target: nil, action: nil)
+    var boosting = false
     var shutterButton: NSButton!
     var recordButton: NSButton!
     var timelapseButton: NSButton!
@@ -436,7 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
         window.title = "Keychain Cam"
-        window.minSize = NSSize(width: 720, height: 440)
+        window.minSize = NSSize(width: 880, height: 460)
         window.center()
 
         let root = NSView()
@@ -477,7 +651,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timelapseButton.keyEquivalent = "t"
         timelapseButton.toolTip = "Start or stop a time-lapse (T)"
 
-        let row1 = NSStackView(views: [soundLabel, micPopup, meter, NSView(), tlLabel, intervalPopup, timelapseButton])
+        boostCheck.state = UserDefaults.standard.object(forKey: "boost") as? Bool ?? true ? .on : .off
+        boostCheck.target = self; boostCheck.action = #selector(boostChanged)
+        boostCheck.toolTip = "After recording, raise quiet sound (like the keychain camera's weak mic) to a normal level"
+
+        let row1 = NSStackView(views: [soundLabel, micPopup, meter, boostCheck, NSView(), tlLabel, intervalPopup, timelapseButton])
 
         // Row 2: status + main actions
         shutterButton = button("  Take Photo  ", "camera.fill", #selector(takePhoto))
@@ -553,7 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateButtons() {
         let busy = camera.isRecording || timelapse != nil
         shutterButton.isEnabled = isLive
-        recordButton.isEnabled = isLive && timelapse == nil
+        recordButton.isEnabled = isLive && timelapse == nil && !boosting
         timelapseButton.isEnabled = (isLive && !camera.isRecording) || timelapse != nil
         micPopup.isEnabled = !busy
         intervalPopup.isEnabled = timelapse == nil
@@ -589,6 +767,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let choice = MicChoice(rawValue: micPopup.titleOfSelectedItem ?? "") else { return }
         camera.micChoice = choice
         camera.connect(force: true)
+    }
+
+    @objc func boostChanged() {
+        UserDefaults.standard.set(boostCheck.state == .on, forKey: "boost")
     }
 
     @objc func intervalChanged() {
@@ -634,8 +816,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let t = Int(Date().timeIntervalSince(recStart))
         if FileManager.default.fileExists(atPath: url.path) {
             lastSaved = url
-            saved.stringValue = "Saved \(url.lastPathComponent) (\(t / 60):\(String(format: "%02d", t % 60)))"
+            let summary = "Saved \(url.lastPathComponent) (\(t / 60):\(String(format: "%02d", t % 60)))"
                 + (error == nil ? "" : " – stopped early")
+            saved.stringValue = summary
+            guard boostCheck.state == .on, camera.micName != nil else { return }
+            // Raise the sound level in the background; keep recording disabled until it's done
+            boosting = true
+            updateButtons()
+            saved.stringValue = summary + " – boosting sound…"
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = Result { try AudioBoost.process(url) }
+                DispatchQueue.main.async {
+                    self.boosting = false
+                    self.updateButtons()
+                    switch result {
+                    case .success(let db?):
+                        log(String(format: "boosted %@ by %.1f dB", url.lastPathComponent, db))
+                        self.saved.stringValue = summary + String(format: " – sound +%.0f dB", db)
+                    case .success(nil):
+                        log("boost: \(url.lastPathComponent) already loud enough")
+                        self.saved.stringValue = summary
+                    case .failure(let e):
+                        log("boost failed: \(e)")
+                        self.saved.stringValue = summary + " – couldn't boost sound"
+                    }
+                }
+            }
         } else {
             saved.stringValue = "Recording failed: \(error?.localizedDescription ?? "unknown error")"
             NSSound.beep()

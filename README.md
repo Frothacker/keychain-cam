@@ -38,15 +38,15 @@ When you plug the camera in by USB, it shows a menu: **Memory**, **PC Camera** o
 | Start/stop video (H.264 + AAC `.mov`) | Record | R |
 | Start/stop time‑lapse (one frame every 1 s to 1 min, played back at 30 fps as `.mp4`) | Start Time‑lapse | T |
 
-Everything is saved to `~/Desktop/Keychain Camera/Webcam/`. The **Sound** menu picks the camera's microphone or your Mac's, and the meter next to it shows the live level. The camera works as a normal webcam in any other app too (FaceTime, Zoom, OBS…), where it shows up as **"HD video"**.
+Everything is saved to `~/Desktop/Keychain Camera/Webcam/`. The **Sound** menu picks the camera's microphone or your Mac's, and the meter next to it shows the live level. With **Boost quiet sound** on (the default), each recording's sound is raised to a normal level after you stop. It also gets a ~90 Hz high‑pass, a gentle noise gate that turns down the hiss between words, and a soft limiter. Recordings that are already loud are left alone. The camera works as a normal webcam in any other app too (FaceTime, Zoom, OBS…), where it shows up as **"HD video"**.
 
 ### Memory → auto‑import
 
-New files are copied to `~/Desktop/Keychain Camera/<date>/<time>_<name>` a couple of seconds after the card mounts. You get a notification and the folder opens. Files are never deleted from the card, and nothing is copied twice. AVI videos are converted with [`importer/avi2mp4.swift`](importer/avi2mp4.swift) (motion‑JPEG + PCM or IMA‑ADPCM → H.264 + AAC). You can also use it on its own:
+New files are copied to `~/Desktop/Keychain Camera/<date>/<time>_<name>` a couple of seconds after the card mounts. You get a notification and the folder opens. Files are never deleted from the card, and nothing is copied twice. AVI videos are converted with [`importer/avi2mp4.swift`](importer/avi2mp4.swift) (motion‑JPEG + PCM or IMA‑ADPCM → H.264 + AAC), which applies the same sound boost. You can also use it on its own:
 
 ```bash
 swiftc -O importer/avi2mp4.swift -o avi2mp4
-./avi2mp4 VID00001.avi VID00001.mp4
+./avi2mp4 VID00001.avi VID00001.mp4             # add --no-boost to keep the original sound level
 ```
 
 Logs are written to `~/Library/Logs/Keychain Cam/`.
@@ -56,7 +56,8 @@ Logs are written to `~/Library/Logs/Keychain Cam/`.
 - **Set the camera's clock** before you travel, because the import folders use the camera's date.
 - **The camera turns itself off**: look for an *Auto Off* / power‑save option in its menu.
 - **Battery**: the camera has a charge controller, so leaving it plugged in won't overcharge it. Still, don't leave it on USB for days at a time (lithium cells age faster when they're kept full and warm), and stop using it if it gets hot or swells.
-- **The camera mic is silent in PC Camera mode**: on the unit this was built with, the camera sent silence over USB. If the meter doesn't move when you talk, switch **Sound** to *Mac mic*.
+- **The camera mic is very quiet** (speech around −45 dBFS, and its USB volume control does nothing). Boost quiet sound fixes the level, but it's still a tiny mic, so pick **Mac mic** when sound matters. It can also send stretches of pure silence; if the meter doesn't move at all, unplug and replug the camera.
+- **macOS asks for camera/mic access again after every rebuild**: the build is ad‑hoc signed, so each build looks like a new app to macOS.
 
 ## The hardware
 
