@@ -153,7 +153,8 @@ button.primary kbd, button.recording kbd { color: inherit; border-color: current
   <p>These keychain cameras (sold as "G6" or "mini 1080p", built on an HX‑Tech HX330X chip; <a href="https://www.aliexpress.com/item/1005010428506117.html">this is the one I bought</a>) turn into a normal USB webcam when you pick <b>PC Camera</b>. This page asks your browser for that webcam and does everything else on your own device: nothing is uploaded anywhere.</p>
   <ul>
     <li><b>Works in</b> Chrome, Edge and Safari on a Mac, Windows PC or Chromebook, and in Chrome on most Android phones.</li>
-    <li><b>Not on iPhone.</b> iOS doesn't let apps or websites use USB webcams. iPads with USB‑C can, in apps.</li>
+    <li><b>No live view on iPhone.</b> iOS only lets websites use the phone's own cameras (tested: the keychain camera never shows up). iPads with USB‑C can use it in apps.</li>
+    <li><b>Photos on iPhone:</b> plug the camera in, pick <b>Memory</b> on its screen, and open the <i>Files</i> app. It shows up as a drive called <b>NO NAME</b>; copy what you want from <b>PHOTO</b> and <b>VIDEO</b>.</li>
     <li><b>Offline:</b> after one visit the page keeps working with no internet. In Chrome use <i>Install</i> in the address bar, or in Safari <i>File → Add to Dock</i>, to get it as its own app.</li>
     <li><b>Photos</b> are 1920×1080 JPEGs. For the full 2560×1440 photos, use the camera on its own and copy them off the card.</li>
     <li><b>Sound:</b> the camera's own mic is used by default. It's very quiet and crackly, so this page boosts it and cleans it up with a small AI noise remover. Try the filters on your own voice in the <a href="sound/">Sound Lab</a>. Your computer's mic usually sounds better.</li>
@@ -270,7 +271,7 @@ import { createChain, savedSettings } from './sound-chain.js';
       }
       showEmpty(false);
       if (kc) say('Keychain camera connected.');
-      else if (iOS) say(`This ${/iPad/.test(navigator.userAgent) || navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent) ? 'iPad' : 'iPhone'} only offers its own cameras (${cams.length} found), not the keychain camera. iOS usually doesn't let websites use USB cameras.`, true);
+      else if (iOS) say(`This ${/iPad/.test(navigator.userAgent) || navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent) ? 'iPad' : 'iPhone'} only offers its own cameras (${cams.length} found), not the keychain camera. iOS doesn't let websites use USB cameras. To copy photos to this phone, pick Memory on the camera and open the Files app.`, true);
       else say("Couldn't find the keychain camera, so this is another camera. Plug it in, pick PC Camera on it, then choose it in the camera menu.", true);
       store.set('cam', track.getSettings().deviceId || '');
       if (micSel.value !== 'none') startAudio(micSel.value);
