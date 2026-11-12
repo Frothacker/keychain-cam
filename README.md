@@ -3,6 +3,7 @@
 A tiny macOS companion for the cheap **"G6" 1080p keychain cameras** sold on AliExpress (the ones with a 0.96" screen, a flash and a USB‑C port, built around the **HX‑Tech HX330X** chip).
 
 - **Keychain Cam.app**: a live view of the camera over USB with **photos**, **video with sound** and **time‑lapse**.
+- **[Web version](https://finns.page/keychain-cam/)**: live view, photos and video in the browser, with nothing to install and offline support (Mac, Windows, Chromebook, Android; source in [`web/`](web/)).
 - **Auto‑import**: plug the camera in as a drive and new photos and videos land on your Desktop, sorted by day. The camera's `.avi` videos also get an **`.mp4` copy** that plays in Photos, QuickTime and on phones.
 
 There are no dependencies: everything is plain Swift and AVFoundation, built on your Mac by the install script.
@@ -56,7 +57,7 @@ Logs are written to `~/Library/Logs/Keychain Cam/`.
 - **Set the camera's clock** before you travel, because the import folders use the camera's date.
 - **The camera turns itself off**: look for an *Auto Off* / power‑save option in its menu.
 - **Battery**: the camera has a charge controller, so leaving it plugged in won't overcharge it. Still, don't leave it on USB for days at a time (lithium cells age faster when they're kept full and warm), and stop using it if it gets hot or swells.
-- **The camera mic is very quiet** (speech around −45 dBFS, and its USB volume control does nothing). Boost quiet sound fixes the level, but it's still a tiny mic, so pick **Mac mic** when sound matters. It can also send stretches of pure silence; if the meter doesn't move at all, unplug and replug the camera.
+- **The camera mic is very quiet** (speech around −45 dBFS, and its USB volume control does nothing). Boost quiet sound fixes the level, but it's still a tiny mic, so pick **Mac mic** when sound matters. It also tends to cut out: half a second of sound, then pure digital silence. The app watches for this, and if it happens before you press Record it switches **Sound** to **Mac mic** and tells you. During a recording it warns you instead. Replugging the camera sometimes brings the mic back.
 - **macOS asks for camera/mic access again after every rebuild**: the build is ad‑hoc signed, so each build looks like a new app to macOS.
 
 ## The hardware
@@ -87,6 +88,7 @@ Further reading:
 ```
 app/        Keychain Cam.app (Swift/AppKit/AVFoundation) + build script + icon
 importer/   auto-import script and the avi2mp4 converter
+web/        the browser version (one HTML file + offline service worker)
 tools/      audiocheck: prints a movie's tracks and audio level
 install.sh / uninstall.sh
 ```

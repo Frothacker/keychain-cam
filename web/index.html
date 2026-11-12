@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Keychain Cam</title>
+<meta name="description" content="Plug in a cheap USB keychain camera and use it as a camera: live view, photos and video, right in the browser. Works offline.">
+<meta property="og:title" content="Keychain Cam">
+<meta property="og:url" content="https://finns.page/keychain-cam/">
+<meta name="theme-color" content="#F5EFE3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1C1915" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script>try{var t=localStorage.getItem('theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
+<style>
+/* Same colours and type as the rest of finns.page. Everything is in this one file so it works offline. */
+:root {
+  --paper: #F5EFE3; --ink: #2B2622; --muted: #756A5F; --rule: #E2D8C6; --link: #2F5D8C;
+  --well: #E9E0CF; --rec: #C2412D; --ok: #3C7A4A;
+  color-scheme: light;
+  --font-text: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --paper: #1C1915; --ink: #E9E1D3; --muted: #A39684; --rule: #37312A; --link: #9CBFE3; --well: #26221D; --rec: #E0624C; --ok: #7FBF8C; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --paper: #1C1915; --ink: #E9E1D3; --muted: #A39684; --rule: #37312A; --link: #9CBFE3; --well: #26221D; --rec: #E0624C; --ok: #7FBF8C; color-scheme: dark; }
+* { box-sizing: border-box; }
+html { background: var(--paper); -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 18px/1.65 var(--font-text); }
+main { max-width: 60rem; margin: 0 auto; padding: 2.5rem 20px 4rem; }
+a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.1; margin: 1.5rem 0 0.4rem; }
+h2 { font-size: 1.25rem; margin: 2.5rem 0 0.5rem; }
+p { margin: 0 0 1rem; max-width: 38rem; }
+ol, ul { max-width: 38rem; padding-left: 1.3rem; }
+li { margin: 0 0 0.4rem; }
+.lede { color: var(--muted); }
+.back { font-size: 0.95rem; margin: 0; }
+[hidden] { display: none !important; }
+
+/* Camera */
+.stage { position: relative; margin: 1.5rem 0 0; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 9; }
+.stage video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.stage.mirror video { transform: scaleX(-1); }
+.stage.grid::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(to right, transparent calc(33.33% - 0.5px), rgba(255,255,255,.35) calc(33.33% - 0.5px), rgba(255,255,255,.35) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255,255,255,.35) calc(66.66% - 0.5px), rgba(255,255,255,.35) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgba(255,255,255,.35) calc(33.33% - 0.5px), rgba(255,255,255,.35) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255,255,255,.35) calc(66.66% - 0.5px), rgba(255,255,255,.35) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px));
+}
+.empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; text-align: center; color: #E9E1D3; font-family: var(--font-ui); font-size: 15px; line-height: 1.45; }
+.empty p { margin: 0; max-width: 26rem; color: #BDB3A4; }
+.flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.flash.go { animation: flash .35s ease-out; }
+@keyframes flash { from { opacity: .85; } to { opacity: 0; } }
+.badge { position: absolute; top: 12px; left: 12px; font: 600 13px/1 var(--font-ui); letter-spacing: .04em; color: #fff; background: var(--rec); padding: 6px 9px; border-radius: 5px; }
+.badge::before { content: "● "; }
+.count { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 120px/1 var(--font-ui); color: #fff; text-shadow: 0 2px 20px rgba(0,0,0,.5); pointer-events: none; }
+.info { position: absolute; right: 12px; bottom: 10px; font: 500 12px/1 var(--font-ui); color: rgba(255,255,255,.75); text-shadow: 0 1px 3px #000; font-variant-numeric: tabular-nums; }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 14px 0 0; font: 15px/1.3 var(--font-ui); }
+.bar.main { justify-content: space-between; }
+.group { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+button, select { font: inherit; color: var(--ink); }
+button { cursor: pointer; border: 1px solid var(--rule); background: var(--well); border-radius: 8px; padding: 9px 14px; min-height: 42px; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; padding-inline: 20px; }
+button.recording { background: var(--rec); border-color: var(--rec); color: #fff; }
+.empty button.primary { background: #F5EFE3; color: #2B2622; border-color: #F5EFE3; }
+select { background: var(--well); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; min-height: 42px; max-width: 16rem; }
+label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+kbd { font: 12px/1 var(--font-ui); border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; padding: 2px 5px; color: var(--muted); margin-left: 4px; }
+button.primary kbd, button.recording kbd { color: inherit; border-color: currentColor; opacity: .7; }
+.status { font: 14px/1.4 var(--font-ui); color: var(--muted); margin: 10px 0 0; min-height: 1.4em; }
+.status.err { color: var(--rec); }
+.meter { width: 70px; height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .08s linear; }
+
+/* Shots taken this visit */
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 1rem 0 0; }
+.shot { position: relative; display: block; border-radius: 6px; overflow: hidden; background: var(--well); aspect-ratio: 16 / 9; }
+.shot img, .shot video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.shot span { position: absolute; left: 6px; bottom: 5px; font: 600 11px/1 var(--font-ui); color: #fff; background: rgba(0,0,0,.55); padding: 3px 5px; border-radius: 3px; }
+.small { font-size: 0.95rem; color: var(--muted); }
+
+@media (hover: none) { kbd { display: none; } }
+@media (max-width: 600px) {
+  body { font-size: 17px; }
+  main { padding-top: 1.5rem; }
+  .bar.main { flex-direction: column; align-items: stretch; }
+  .bar.main .group { justify-content: center; }
+  .empty { font-size: 14px; }
+  .count { font-size: 80px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <p class="back"><a href="/">← finns.page</a></p>
+  <h1>Keychain Cam</h1>
+  <p class="lede">Plug in one of those tiny $10 keychain cameras and use it as a proper camera: live view, photos and video. Nothing to install, and it works offline.</p>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="flash" id="flash"></div>
+    <div class="badge" id="badge" hidden>REC 0:00</div>
+    <div class="count" id="count" hidden></div>
+    <div class="info" id="info"></div>
+    <div class="empty" id="empty">
+      <p>Plug the camera in by USB and pick <b>PC Camera</b> on its little screen. Then press Start.</p>
+      <button class="primary" id="start">Start camera</button>
+    </div>
+  </div>
+
+  <div class="bar main">
+    <div class="group">
+      <button class="primary" id="snap" disabled>Take photo<kbd>Space</kbd></button>
+      <button id="rec" disabled>Record<kbd>R</kbd></button>
+      <select id="timer" aria-label="Self-timer">
+        <option value="0">No timer</option>
+        <option value="3">3 s timer</option>
+        <option value="10">10 s timer</option>
+      </select>
+    </div>
+    <div class="group">
+      <select id="cam" aria-label="Camera" disabled><option>Camera</option></select>
+      <select id="mic" aria-label="Sound for videos">
+        <option value="none">No sound</option>
+      </select>
+      <span class="meter" id="meter" hidden><i></i></span>
+    </div>
+  </div>
+  <div class="bar">
+    <label class="check"><input type="checkbox" id="mirror"> Mirror</label>
+    <label class="check"><input type="checkbox" id="grid"> Grid</label>
+    <label class="check" id="folderWrap" hidden><input type="checkbox" id="folderOn"> Save into a folder <button id="folderPick" type="button" hidden>Choose…</button></label>
+  </div>
+  <p class="status" id="status" role="status" aria-live="polite"></p>
+
+  <div id="shotsWrap" hidden>
+    <h2>Taken this visit</h2>
+    <p class="small" id="shotsNote">Each one is also saved to your Downloads. Click to save it again.</p>
+    <div class="shots" id="shots"></div>
+  </div>
+
+  <h2>How it works</h2>
+  <p>These keychain cameras (sold as "G6" or "mini 1080p", built on an HX‑Tech HX330X chip) turn into a normal USB webcam when you pick <b>PC Camera</b>. This page asks your browser for that webcam and does everything else on your own device: nothing is uploaded anywhere.</p>
+  <ul>
+    <li><b>Works in</b> Chrome, Edge and Safari on a Mac, Windows PC or Chromebook, and in Chrome on most Android phones.</li>
+    <li><b>Not on iPhone.</b> iOS doesn't let apps or websites use USB webcams. iPads with USB‑C can, in apps.</li>
+    <li><b>Offline:</b> after one visit the page keeps working with no internet. In Chrome use <i>Install</i> in the address bar, or in Safari <i>File → Add to Dock</i>, to get it as its own app.</li>
+    <li><b>Photos</b> are 1920×1080 JPEGs. For the full 2560×1440 photos, use the camera on its own and copy them off the card.</li>
+    <li>The camera's own microphone is very quiet, so this page boosts it. Your computer's mic usually sounds better.</li>
+  </ul>
+  <p>There's also a Mac app with auto‑import and time‑lapse, and notes on hacking the camera's firmware: <a href="https://github.com/Frothacker/keychain-cam">github.com/Frothacker/keychain-cam</a>.</p>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video'), stage = $('stage'), statusEl = $('status');
+  const snapBtn = $('snap'), recBtn = $('rec'), camSel = $('cam'), micSel = $('mic');
+  const KEYCHAIN = /HD video|349c:3301|VendorID_13468/i;   // how the camera names itself
+  const KEYCHAIN_MIC = /HD audio/i;
+
+  let stream = null, recorder = null, recChunks = [], recStart = 0, recTimer = 0;
+  let audio = null;          // { ctx, stream, analyser, raf, src }
+  let dirHandle = null;      // folder picked with "Save into a folder" (Chrome/Edge)
+  let busy = false;
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('kc.' + k); return v === null ? d : v; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('kc.' + k, v); } catch {} }
+  };
+
+  function say(msg, err) { statusEl.textContent = msg || ''; statusEl.classList.toggle('err', !!err); }
+  const pad = n => String(n).padStart(2, '0');
+  function stamp() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; }
+
+  // ---------- camera ----------
+  async function listDevices() {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return { cams: all.filter(d => d.kind === 'videoinput'), mics: all.filter(d => d.kind === 'audioinput') };
+  }
+
+  async function open(deviceId) {
+    stopStream();
+    const want = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+    stream = await navigator.mediaDevices.getUserMedia({ video: deviceId ? { ...want, deviceId: { exact: deviceId } } : want, audio: false });
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    const track = stream.getVideoTracks()[0];
+    const s = track.getSettings();
+    $('info').textContent = `${s.width || video.videoWidth}×${s.height || video.videoHeight}${s.frameRate ? ' · ' + Math.round(s.frameRate) + ' fps' : ''}`;
+    track.addEventListener('ended', () => { say('The camera was unplugged or switched off. Plug it back in and press Start.', true); showEmpty(true); });
+    return track;
+  }
+
+  function stopStream() {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+
+  function showEmpty(on) {
+    $('empty').hidden = !on;
+    snapBtn.disabled = on; recBtn.disabled = on; camSel.disabled = on;
+    if (on) $('info').textContent = '';
+  }
+
+  async function fillCameraMenu(currentId) {
+    const { cams, mics } = await listDevices();
+    camSel.innerHTML = '';
+    cams.forEach((c, i) => {
+      const o = document.createElement('option');
+      o.value = c.deviceId;
+      o.textContent = KEYCHAIN.test(c.label) ? 'Keychain camera' : (c.label || `Camera ${i + 1}`);
+      camSel.appendChild(o);
+    });
+    if (currentId) camSel.value = currentId;
+
+    const keep = micSel.value || store.get('mic', 'none');
+    micSel.innerHTML = '<option value="none">No sound</option>';
+    mics.forEach((m, i) => {
+      const o = document.createElement('option');
+      o.value = m.deviceId;
+      o.textContent = KEYCHAIN_MIC.test(m.label) ? 'Camera mic (boosted)' : (m.deviceId === 'default' ? 'Default mic' : (m.label || `Mic ${i + 1}`));
+      micSel.appendChild(o);
+    });
+    micSel.value = [...micSel.options].some(o => o.value === keep) ? keep : 'none';
+    return cams;
+  }
+
+  async function start() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      say(/iPhone|iPod/.test(navigator.userAgent)
+        ? "iPhones can't use USB webcams, sorry. Try a Mac, PC, Chromebook or Android phone."
+        : 'This browser can\'t use cameras here. Try Chrome, Edge or Safari, over https.', true);
+      return;
+    }
+    if (busy) return; busy = true;
+    say('Asking for the camera…');
+    try {
+      // Ask once with any camera so the browser reveals device names, then switch to the keychain camera.
+      let track = await open(store.get('cam', '') || undefined).catch(() => open());
+      const cams = await fillCameraMenu(track.getSettings().deviceId);
+      const kc = cams.find(c => KEYCHAIN.test(c.label));
+      if (kc && track.getSettings().deviceId !== kc.deviceId) {
+        track = await open(kc.deviceId);
+        camSel.value = kc.deviceId;
+      }
+      showEmpty(false);
+      if (kc) say('Keychain camera connected.');
+      else say("Couldn't find the keychain camera, so this is another camera. Plug it in, pick PC Camera on it, then choose it in the camera menu.", true);
+      store.set('cam', track.getSettings().deviceId || '');
+      if (micSel.value !== 'none') startAudio(micSel.value);
+    } catch (e) {
+      console.error(e);
+      showEmpty(true);
+      if (e.name === 'NotAllowedError') say('Camera access was blocked. Allow it in the address bar (or your system settings) and press Start again.', true);
+      else if (e.name === 'NotFoundError' || e.name === 'OverconstrainedError') say('No camera found. Plug the camera in, pick PC Camera on its screen, wait a few seconds, then press Start.', true);
+      else if (e.name === 'NotReadableError') say('The camera is busy in another app (Zoom, FaceTime, the Mac app…). Close that and try again.', true);
+      else say('Could not start the camera: ' + e.message, true);
+    } finally { busy = false; }
+  }
+
+  // ---------- sound (for videos) ----------
+  async function startAudio(deviceId) {
+    stopAudio();
+    if (deviceId === 'none') return;
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      const label = mic.getAudioTracks()[0]?.label || '';
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(mic);
+      // The camera mic is ~40 dB too quiet: high-pass, big gain, then a compressor as a limiter.
+      const boost = KEYCHAIN_MIC.test(label);
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = boost ? 90 : 20;
+      const gain = ctx.createGain(); gain.gain.value = boost ? 40 : 1;   // about +32 dB
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = boost ? -20 : -6; comp.knee.value = 12; comp.ratio.value = boost ? 8 : 2; comp.attack.value = 0.005; comp.release.value = 0.2;
+      const out = ctx.createMediaStreamDestination();
+      const analyser = ctx.createAnalyser(); analyser.fftSize = 1024;
+      src.connect(hp).connect(gain).connect(comp);
+      comp.connect(out); comp.connect(analyser);
+      audio = { ctx, mic, stream: out.stream, analyser, raf: 0 };
+      $('meter').hidden = false;
+      const buf = new Float32Array(analyser.fftSize), bar = $('meter').firstElementChild;
+      // A real mic always has a little hiss. Exact zeros for 3 s mean it has stopped sending sound
+      // (the keychain camera's mic does this: half a second of sound, then silence).
+      let silentSince = 0, warned = false;
+      const tick = () => {
+        analyser.getFloatTimeDomainData(buf);
+        let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v));
+        if (peak === 0) {
+          silentSince ||= performance.now();
+          if (!warned && performance.now() - silentSince > 3000) {
+            warned = true;
+            say(boost ? "The camera's mic has gone silent (it does that). Pick your computer's mic in the sound menu, or replug the camera." : "This mic isn't sending any sound. Try another one.", true);
+          }
+        } else { silentSince = 0; if (warned) { warned = false; say('Sound is back.'); } }
+        bar.style.width = Math.min(100, Math.round(Math.sqrt(peak) * 100)) + '%';
+        audio.raf = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (e) {
+      console.error(e);
+      micSel.value = 'none';
+      say('Could not use that microphone: ' + (e.name === 'NotAllowedError' ? 'access was blocked.' : e.message), true);
+    }
+  }
+  function stopAudio() {
+    if (!audio) return;
+    cancelAnimationFrame(audio.raf);
+    audio.mic.getTracks().forEach(t => t.stop());
+    audio.ctx.close();
+    audio = null;
+    $('meter').hidden = true;
+  }
+
+  // ---------- saving ----------
+  async function save(blob, name) {
+    if (dirHandle && $('folderOn').checked) {
+      try {
+        if ((await dirHandle.queryPermission({ mode: 'readwrite' })) !== 'granted' &&
+            (await dirHandle.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('no permission');
+        const fh = await dirHandle.getFileHandle(name, { create: true });
+        const w = await fh.createWritable(); await w.write(blob); await w.close();
+        return `Saved ${name} to ${dirHandle.name}.`;
+      } catch (e) { console.warn('folder save failed, downloading instead', e); }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    return `Saved ${name} to Downloads.`;
+  }
+
+  function addShot(blob, name, isVideo) {
+    $('shotsWrap').hidden = false;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.className = 'shot'; a.href = url; a.download = name; a.title = name;
+    const el = document.createElement(isVideo ? 'video' : 'img');
+    el.src = url; if (isVideo) { el.muted = true; el.preload = 'metadata'; } else el.alt = name;
+    a.appendChild(el);
+    const tag = document.createElement('span'); tag.textContent = isVideo ? 'Video' : new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    a.appendChild(tag);
+    $('shots').prepend(a);
+  }
+
+  // ---------- photo ----------
+  async function countdown() {
+    const secs = +$('timer').value;
+    const el = $('count');
+    for (let s = secs; s > 0; s--) { el.textContent = s; el.hidden = false; await new Promise(r => setTimeout(r, 1000)); }
+    el.hidden = true;
+  }
+
+  async function snap() {
+    if (!stream || snapBtn.disabled) return;
+    snapBtn.disabled = true;
+    try {
+      await countdown();
+      const w = video.videoWidth, h = video.videoHeight;
+      if (!w) throw new Error('no picture yet');
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      if ($('mirror').checked) { g.translate(w, 0); g.scale(-1, 1); }
+      g.drawImage(video, 0, 0, w, h);
+      $('flash').classList.remove('go'); void $('flash').offsetWidth; $('flash').classList.add('go');
+      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+      const name = `keychain-cam_${stamp()}.jpg`;
+      addShot(blob, name, false);
+      say(await save(blob, name));
+    } catch (e) { say('Could not take the photo: ' + e.message, true); }
+    finally { snapBtn.disabled = !stream; }
+  }
+
+  // ---------- video ----------
+  function pickType() {
+    const types = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    return types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+  }
+
+  async function toggleRec() {
+    if (recorder) { recorder.stop(); return; }
+    if (!stream) return;
+    if (!window.MediaRecorder) { say("This browser can't record video.", true); return; }
+    const tracks = [...stream.getVideoTracks()];
+    if (audio) tracks.push(...audio.stream.getAudioTracks());
+    const type = pickType();
+    try { recorder = new MediaRecorder(new MediaStream(tracks), { mimeType: type, videoBitsPerSecond: 8_000_000 }); }
+    catch (e) { say('Could not start recording: ' + e.message, true); return; }
+    recChunks = [];
+    recorder.ondataavailable = e => e.data.size && recChunks.push(e.data);
+    recorder.onstop = async () => {
+      const mime = recorder.mimeType || type || 'video/webm';
+      const blob = new Blob(recChunks, { type: mime });
+      recorder = null;
+      clearInterval(recTimer);
+      $('badge').hidden = true; recBtn.classList.remove('recording'); recBtn.firstChild.textContent = 'Record';
+      camSel.disabled = false; micSel.disabled = false;
+      const name = `keychain-cam_${stamp()}.${mime.includes('mp4') ? 'mp4' : 'webm'}`;
+      addShot(blob, name, true);
+      say(await save(blob, name));
+    };
+    recorder.start(1000);
+    recStart = Date.now();
+    $('badge').hidden = false; $('badge').textContent = 'REC 0:00';
+    recTimer = setInterval(() => { const s = Math.floor((Date.now() - recStart) / 1000); $('badge').textContent = `REC ${Math.floor(s / 60)}:${pad(s % 60)}`; }, 500);
+    recBtn.classList.add('recording'); recBtn.firstChild.textContent = 'Stop';
+    camSel.disabled = true; micSel.disabled = true;
+    say(audio ? 'Recording with sound…' : 'Recording (no sound, pick a mic in the menu to add it)…');
+  }
+
+  // ---------- wiring ----------
+  $('start').onclick = start;
+  snapBtn.onclick = snap;
+  recBtn.onclick = toggleRec;
+  camSel.onchange = async () => {
+    try { const t = await open(camSel.value); store.set('cam', t.getSettings().deviceId || ''); say(KEYCHAIN.test(t.label) ? 'Keychain camera connected.' : 'Using ' + t.label + '.'); }
+    catch (e) { say('Could not switch camera: ' + e.message, true); }
+  };
+  micSel.onchange = () => { store.set('mic', micSel.value); if (stream) startAudio(micSel.value); };
+
+  for (const id of ['mirror', 'grid']) {
+    const box = $(id);
+    box.checked = store.get(id, '0') === '1';
+    stage.classList.toggle(id, box.checked);
+    box.onchange = () => { stage.classList.toggle(id, box.checked); store.set(id, box.checked ? '1' : '0'); };
+  }
+  $('timer').value = store.get('timer', '0');
+  $('timer').onchange = () => store.set('timer', $('timer').value);
+
+  // "Save into a folder": Chrome and Edge only. Photos land in the folder without a download prompt each time.
+  if ('showDirectoryPicker' in window) {
+    $('folderWrap').hidden = false;
+    const pick = async () => {
+      try { dirHandle = await showDirectoryPicker({ id: 'keychain-cam', mode: 'readwrite', startIn: 'pictures' }); $('folderPick').textContent = dirHandle.name; $('folderPick').hidden = false; $('shotsNote').textContent = 'Each one is also saved into ' + dirHandle.name + '. Click to download it again.'; say('Saving into ' + dirHandle.name + '.'); return true; }
+      catch { return false; }
+    };
+    $('folderOn').onchange = async () => {
+      if ($('folderOn').checked && !dirHandle && !(await pick())) $('folderOn').checked = false;
+      $('folderPick').hidden = !$('folderOn').checked;
+    };
+    $('folderPick').onclick = e => { e.preventDefault(); pick(); };
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('select, input, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === 'Space') { e.preventDefault(); if (stream) snap(); else start(); }
+    else if (e.key === 'r' || e.key === 'R') { if (stream) toggleRec(); }
+  });
+
+  // Replugging the camera: offer the keychain camera again.
+  navigator.mediaDevices?.addEventListener?.('devicechange', async () => {
+    if (!stream || recorder) return;
+    const { cams } = await listDevices();
+    const kc = cams.find(c => KEYCHAIN.test(c.label));
+    const cur = stream.getVideoTracks()[0];
+    if (kc && cur.readyState === 'live' && !KEYCHAIN.test(cur.label)) {
+      await fillCameraMenu(cur.getSettings().deviceId);
+      say('Keychain camera found. Pick it in the camera menu.');
+    }
+  });
+
+  // Start straight away if the browser already allowed the camera on an earlier visit.
+  navigator.permissions?.query({ name: 'camera' }).then(p => { if (p.state === 'granted') start(); }).catch(() => {});
+
+  // Offline support
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>

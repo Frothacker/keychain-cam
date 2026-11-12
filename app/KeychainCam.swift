@@ -65,6 +65,9 @@ final class Camera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
     var onRecordingFinished: ((URL, Error?) -> Void)?
     /// Live sound level 0…1, called on the main thread about 15 times a second
     var onLevel: ((Double) -> Void)?
+    /// Called once (main thread) when the mic has sent nothing but digital zeros for a few seconds.
+    /// The keychain camera's mic does this: half a second of sound, then pure silence.
+    var onMicSilent: (() -> Void)?
 
     override init() {
         super.init()
@@ -182,12 +185,14 @@ final class Camera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
         }
         fpsCount = 0; fpsStart = Date(); fpsReports = 0
         audioReports = 0; audioWindowStart = Date(); audioWindowPeak = 0
+        silentSince = nil; silentReported = false
     }
 
     // Diagnostics logged for the first few seconds after connecting
     private var fpsCount = 0, fpsStart = Date(), fpsReports = 0
     private var audioReports = 0, audioWindowStart = Date(), audioWindowPeak: Float = 0
     private var lastLevelSent = Date.distantPast
+    private var silentSince: Date?, silentReported = false
 
     func captureOutput(_ o: AVCaptureOutput, didOutput sb: CMSampleBuffer, from c: AVCaptureConnection) {
         if o === audioOutput { handleAudio(sb); return }
@@ -223,6 +228,18 @@ final class Camera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
                 log(String(format: "mic peak %.3f%% (%@)", audioWindowPeak * 100, micName ?? "-"))
                 audioWindowPeak = 0; audioWindowStart = Date(); audioReports += 1
             }
+        }
+        // A real mic always picks up a little hiss; exact zeros mean the mic has stopped sending sound.
+        if peak == 0 {
+            if silentSince == nil { silentSince = Date() }
+            if !silentReported, let t = silentSince, Date().timeIntervalSince(t) >= 3 {
+                silentReported = true
+                log("mic \(micName ?? "-") is sending pure silence")
+                DispatchQueue.main.async { self.onMicSilent?() }
+            }
+        } else {
+            if silentReported { log("mic \(micName ?? "-") has sound again") }
+            silentSince = nil; silentReported = false
         }
         if Date().timeIntervalSince(lastLevelSent) > 1.0 / 15 {
             lastLevelSent = Date()
@@ -389,10 +406,12 @@ enum AudioBoost {
         return x
     }
 
-    /// Boosts the movie's sound in place. Returns the gain applied in dB, or nil if nothing was changed.
-    static func process(_ url: URL) throws -> Float? {
+    enum Outcome { case boosted(Float), loudEnough, silent }
+
+    /// Boosts the movie's sound in place and says what it did.
+    static func process(_ url: URL) throws -> Outcome {
         let asset = AVURLAsset(url: url)
-        guard let audio = asset.tracks(withMediaType: .audio).first else { return nil }
+        guard let audio = asset.tracks(withMediaType: .audio).first else { return .silent }
         let video = asset.tracks(withMediaType: .video).first
 
         // Pass 1: measure the speech level
@@ -414,14 +433,14 @@ enum AudioBoost {
                 if n == window { levels.append((sum / Float(n)).squareRoot()); sum = 0; n = 0 }
             }
         }
-        guard sampleRate > 0, !levels.isEmpty else { return nil }
+        guard sampleRate > 0, !levels.isEmpty else { return .silent }
         // Ignore stretches of pure digital silence (the camera mic sometimes sends zeros)
         let audible = levels.filter { $0 > 1e-6 }.sorted(by: >)
-        guard !audible.isEmpty else { return nil }
+        guard !audible.isEmpty else { return .silent }
         let loud = audible.prefix(max(1, audible.count / 5))
         let speech = loud.reduce(0, +) / Float(loud.count)
         let gain = min(maxGain, targetLevel / speech)
-        guard gain >= minUsefulGain else { return nil }
+        guard gain >= minUsefulGain else { return .loudEnough }
         // Hiss = the quietest tenth of windows. levels are RMS; the gate follows average |signal|
         // (≈ 0.8 × RMS), so 2× the hiss RMS sits safely above hiss and well below speech.
         let quiet = audible.suffix(max(1, audible.count / 10))
@@ -497,7 +516,7 @@ enum AudioBoost {
             throw writer.error ?? reader.error ?? CocoaError(.fileWriteUnknown)
         }
         _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
-        return 20 * log10(gain)
+        return .boosted(20 * log10(gain))
     }
 }
 
@@ -557,6 +576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         camera.onRecordingFinished = { [weak self] url, error in self?.recordingFinished(url, error) }
         camera.onLevel = { [weak self] level in self?.meter.doubleValue = level * 10 }
+        camera.onMicSilent = { [weak self] in self?.micWentSilent() }
         camera.onStatus?("Starting…")
         AVCaptureDevice.requestAccess(for: .video) { ok in
             DispatchQueue.main.async {
@@ -769,6 +789,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         camera.connect(force: true)
     }
 
+    /// The mic is sending pure silence (the keychain camera's mic does this now and then).
+    private func micWentSilent() {
+        if camera.isRecording {
+            saved.stringValue = "⚠︎ The mic went silent – this video may have no sound. Stop, and set Sound to Mac mic."
+            NSSound.beep()
+        } else if camera.micChoice == .camera, timelapse == nil {
+            camera.micChoice = .mac
+            micPopup.selectItem(withTitle: MicChoice.mac.rawValue)
+            camera.connect(force: true)
+            saved.stringValue = "The camera's mic went silent, so Sound is now Mac mic. To try it again, replug the camera and pick Camera mic."
+        } else if timelapse == nil {
+            saved.stringValue = "⚠︎ The mic isn't sending any sound. Try another one in the Sound menu."
+        }
+    }
+
     @objc func boostChanged() {
         UserDefaults.standard.set(boostCheck.state == .on, forKey: "boost")
     }
@@ -830,12 +865,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.boosting = false
                     self.updateButtons()
                     switch result {
-                    case .success(let db?):
+                    case .success(.boosted(let db)):
                         log(String(format: "boosted %@ by %.1f dB", url.lastPathComponent, db))
                         self.saved.stringValue = summary + String(format: " – sound +%.0f dB", db)
-                    case .success(nil):
+                    case .success(.loudEnough):
                         log("boost: \(url.lastPathComponent) already loud enough")
                         self.saved.stringValue = summary
+                    case .success(.silent):
+                        log("boost: \(url.lastPathComponent) has no sound at all")
+                        self.saved.stringValue = summary + " – ⚠︎ no sound was recorded"
                     case .failure(let e):
                         log("boost failed: \(e)")
                         self.saved.stringValue = summary + " – couldn't boost sound"
