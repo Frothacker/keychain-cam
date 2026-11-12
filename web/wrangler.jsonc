@@ -1,0 +1,9 @@
+// Publishes web/ at https://finns.page/keychain-cam/ as its own small Worker,
+// so the rest of finns.page is untouched. Run ./web/deploy.sh.
+{
+  "name": "keychain-cam",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "../build/site", "html_handling": "auto-trailing-slash", "not_found_handling": "none" },
+  "routes": [{ "pattern": "finns.page/keychain-cam*", "zone_name": "finns.page" }],
+  "workers_dev": false
+}
