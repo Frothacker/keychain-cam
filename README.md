@@ -5,7 +5,7 @@ A tiny macOS companion for the cheap **"G6" 1080p keychain cameras** sold on [Al
 - **Keychain Cam.app**: a live view of the camera over USB with **photos**, **video with sound** and **time‑lapse**.
 - **[Web version](https://finns.page/keychain-cam/)**: live view, photos and video in the browser, with nothing to install and offline support (Mac, Windows, Chromebook, Android; source in [`web/`](web/)).
 - **[Sound Lab](https://finns.page/keychain-cam/sound/)**: record a clip from the camera mic, loop it and try noise filters (RNNoise and GTCRN AI denoisers, gate, EQ) live; the camera page then uses your settings.
-- **Auto‑import**: plug the camera in as a drive and new photos and videos land on your Desktop, sorted by day. The camera's `.avi` videos also get an **`.mp4` copy** that plays in Photos, QuickTime and on phones.
+- **Auto‑import**: plug the camera in as a drive and new photos and videos land on your Desktop, sorted by day and labelled with which camera they came from. Then it offers to clear the camera. The camera's `.avi` videos also get an **`.mp4` copy** that plays in Photos, QuickTime and on phones.
 
 There are no dependencies: everything is plain Swift and AVFoundation, built on your Mac by the install script.
 
@@ -44,7 +44,12 @@ Everything is saved to `~/Desktop/Keychain Camera/Webcam/`. The **Sound** menu p
 
 ### Memory → auto‑import
 
-New files are copied to `~/Desktop/Keychain Camera/<date>/<time>_<name>` a couple of seconds after the card mounts. You get a notification and the folder opens. Files are never deleted from the card, and nothing is copied twice. AVI videos are converted with [`importer/avi2mp4.swift`](importer/avi2mp4.swift) (motion‑JPEG + PCM or IMA‑ADPCM → H.264 + AAC), which applies the same sound boost. You can also use it on its own:
+New files are copied to `~/Desktop/Keychain Camera/<date>/<time>_<camera>_<name>` a couple of seconds after the card mounts, and the folder opens. Nothing is copied twice.
+
+- **Several cameras**: the first time a camera is plugged in you're asked what to call it (Yellow, Grey, Clear…). Every unit reports the same USB serial number, so the name is saved on the camera's card in a hidden `.keychaincam-name` file. The card's volume ID is also kept on the Mac in case that file goes missing. Files get the camera's name in their file name and as a Finder tag, which is coloured when the name is a colour. If you swap cards between cameras, the name goes with the card.
+- **Clearing the camera**: after each import you're asked *Clear the camera?* If you say yes, each file is compared byte for byte with its copy on the Mac and deleted from the card only if they match. The card is then ejected so you can unplug it.
+
+AVI videos are converted with [`importer/avi2mp4.swift`](importer/avi2mp4.swift) (motion‑JPEG + PCM or IMA‑ADPCM → H.264 + AAC), which applies the same sound boost. You can also use it on its own:
 
 ```bash
 swiftc -O importer/avi2mp4.swift -o avi2mp4
